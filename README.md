@@ -1,5 +1,7 @@
 # Nexo Assist
 
+[![CI](https://github.com/gabdecastro/nexo-assist/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gabdecastro/nexo-assist/actions/workflows/ci.yml)
+
 Service desk de demonstração com chat, triagem auditável em LangGraph.js, integração Gemini, serviço simulado de chamados e console de analista. Implementado a partir de [spec.md](spec.md) e das seis telas de [nexo.pen](design/nexo.pen).
 
 ## Executar
@@ -64,6 +66,8 @@ npm run test:integration
 ```
 
 Esse comando compila frontend/backend/entrada serverless e executa a suíte Node. Os testes usam dados e portas temporários; não alteram a demonstração nem consomem APIs reais. Cobrem privacidade, confirmações, edição, handoff, concorrência, reinício, SLA, reabertura, indisponibilidade, escopo, impacto, aplicabilidade da VPN, limites de sessão, contrato Gemini, orçamento e roteamento semântico pelo grafo.
+
+O [pipeline CI](.github/workflows/ci.yml) executa em pushes, pull requests e manualmente pelo GitHub Actions. Usa Ubuntu e Node 22, instala com `npm ci` e roda o comando acima. As actions são fixadas por hash, o token tem somente permissão de leitura e execuções antigas da mesma branch são canceladas. Não exige secrets nem publica deploys.
 
 Para validar o LLM real, configure a chave, inicie uma conversa e pergunte “Quais registros de suporte existem em meu nome?”. Expanda a auditoria: deve conter “Triagem Gemini”, a intenção e a evidência, além dos tickets próprios. Teste também uma dúvida de senha e um caso ambíguo. Uma resposta apenas determinística ou um erro do provedor não valida esse caminho. Não foi feita avaliação com chave real nesta revisão.
 
