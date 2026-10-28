@@ -9,5 +9,5 @@ export interface Audit { intent: string; action: string; evidence: string[]; con
 export interface Ticket { id: string; ownerId: string; affectedPerson: string; title: string; description: string; type: TicketType; category: Category; priority: Priority; status: TicketStatus; createdAt: string; updatedAt: string; dueAt: string; history: string[] }
 export interface Draft { title?: string; description?: string; type?: TicketType; category?: Category; priority?: Priority; affectedPerson?: string; existingTicketId?: string }
 export interface Message { id: string; role: 'user' | 'assistant' | 'analyst' | 'system'; content: string; createdAt: string; quickReplies?: string[]; ticketCard?: Ticket; draftCard?: Draft; audit?: Audit }
-export interface Conversation { id: string; ownerId: string; status: ConversationStatus; messages: Message[]; draft?: Draft; assignedAnalyst?: string; createdAt: string; updatedAt: string }
-export interface Database { employees: Employee[]; articles: HelpArticle[]; tickets: Ticket[]; conversations: Conversation[] }
+export interface Conversation { id: string; ownerId: string; status: ConversationStatus; messages: Message[]; draft?: Draft; assignedAnalyst?: string; handoffSummary?: string; processingUntil?: number; createdAt: string; updatedAt: string }
+export interface Database { employees: Employee[]; articles: HelpArticle[]; tickets: Ticket[]; conversations: Conversation[]; modelUsage?: { day: string; calls: number } }
