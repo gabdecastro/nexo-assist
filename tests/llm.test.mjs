@@ -29,3 +29,18 @@ test('Gemini request is bounded, uses structured output and stops at persisted d
   assert.equal(calls, 1);
   delete process.env.GEMINI_API_KEY;
 });
+
+
+test('LangGraph uses semantic intent and exposes provider evidence without exposing other owners', async t => {
+  process.env.GEMINI_API_KEY = 'test-only'; process.env.LLM_DAILY_LIMIT = '2';
+  const { mutateDb, timestamp } = await import('../dist-server/store.js');
+  const { AgentService } = await import('../dist-server/agent.js');
+  const id = 'semantic-graph-test';
+  await mutateDb(db => db.conversations.push({ id, ownerId: 'emp-ana', status: 'assistant_active', messages: [], createdAt: timestamp(), updatedAt: timestamp() }));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ intent: 'list', articleId: '', confidence: 0.95, reason: 'Pessoa quer consultar os registros próprios.' }) }] } }] }));
+  const result = await new AgentService().respond(id, 'emp-ana', 'Quais registros de suporte existem em meu nome?');
+  assert.equal(result.messages.at(-1).audit.action, 'listar_tickets');
+  assert.ok(result.messages.at(-1).audit.evidence.some(text => text.includes('Triagem Gemini')));
+  assert.ok(!result.messages.at(-1).quickReplies.includes('INC-20914'));
+  delete process.env.GEMINI_API_KEY;
+});

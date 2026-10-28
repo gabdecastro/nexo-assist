@@ -7,7 +7,7 @@ import type { Audit, Conversation, Draft, Message } from './types.js';
 const tickets = new TicketService();
 const makeMessage = (role: Message['role'], content: string, extra: Partial<Message> = {}): Message => ({ id: newId('msg'), role, content, createdAt: timestamp(), ...extra });
 
-function knownImpact(text: string): boolean { return /sem urgência|sem urgencia|não urgente|nao urgente|não consigo trabalhar|impede.*trabalh|compromisso.*hoje|reunião.*hoje|alternativa|contorno|lent[oa]|atrapalha|equipe.*parad|equipe inteira|empresa toda|todos pararam/i.test(text); }
+function knownImpact(text: string): boolean { return /sem urgência|sem urgencia|não (é )?urgente|nao (e )?urgente|não consigo trabalhar|impede.*trabalh|compromisso.*hoje|reunião.*hoje|alternativa|contorno|lent[oa]|atrapalha|equipe.*parad|equipe inteira|equipe toda|empresa toda|todos pararam/i.test(text); }
 function categoryFrom(text: string) { return classifyTicket(text).category; }
 function makeAudit(intent: string, action: string, evidence: string[], confidence: number, reason: string, outcome: string): Audit { return { intent, action, evidence, confidence, reason, outcome }; }
 
@@ -38,7 +38,9 @@ export class AgentService {
       .addNode('apply_policy', async state => {
         const employee = (await readDb()).employees.find(e => e.id === ownerId);
         if (!employee) throw new Error('Funcionário não encontrado.');
-        return { reply: await this.decide(state.conversation, employee, input.trim(), input.trim().toLocaleLowerCase('pt-BR'), state.interpretation) };
+        const reply = await this.decide(state.conversation, employee, input.trim(), input.trim().toLocaleLowerCase('pt-BR'), state.interpretation);
+        if (reply.audit && state.interpretation) reply.audit.evidence.push(`Triagem Gemini (${process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'}): ${state.interpretation.intent}, confiança ${state.interpretation.confidence}; ${state.interpretation.reason}`);
+        return { reply };
       })
       .addNode('persist', async state => ({ conversation: await mutateDb(db => {
         const found = db.conversations.find(c => c.id === conversationId && c.ownerId === ownerId)!;
@@ -84,8 +86,8 @@ export class AgentService {
       return makeMessage('assistant', 'Tudo bem, cancelei o rascunho. Nada foi alterado.', { audit: makeAudit('cancelar_chamado', 'descartar_rascunho', [], 0.99, 'A pessoa não confirmou a ação.', 'Nenhum chamado foi alterado.') });
     }
     if (pending && !/^(sim|confirmo|confirmar|confirmar e enviar|pode criar|pode abrir|isso|ok|certo|pode atualizar|não|nao|cancelar)$/i.test(text.trim())) {
-      const choicePriority = /minha equipe está parada|equipe inteira|todos pararam/.test(lower) ? 'Crítica' : /compromisso hoje|impede meu trabalho/.test(lower) ? 'Alta' : /tenho alternativa/.test(lower) ? 'Média' : undefined;
-      const choiceCategory = /acesso|equipamento|software/.test(lower) ? 'REQ' : undefined;
+      const choicePriority = /minha equipe está parada|equipe inteira|todos pararam/.test(lower) ? 'Crítica' : /compromisso hoje|impede meu trabalho/.test(lower) ? 'Alta' : /tenho alternativa/.test(lower) ? 'Média' : knownImpact(text) ? classifyTicket(text).priority : undefined;
+      const choiceCategory = /^é um pedido de acesso\/equipamento$/.test(lower) ? 'REQ' : undefined;
       const firstDetails = !pending.title;
       if (firstDetails && /^(é um pedido de acesso\/equipamento|impede meu trabalho|tenho alternativa|só eu estou afetado)$/i.test(text)) {
         await mutateDb(db => { const c = db.conversations.find(c => c.id === conversation.id)!; c.draft = { ...pending, description: text, priority: knownImpact(text) ? classifyTicket(text).priority : pending.priority }; });
@@ -152,7 +154,7 @@ export class AgentService {
     const complete = Boolean(draft.title && draft.description && draft.type && draft.category && draft.priority && draft.affectedPerson);
     const priority = draft.priority ?? 'Média';
     if (priority === 'Crítica') return makeMessage('assistant', 'A equipe parece parada. Vou encaminhar o caso como prioridade crítica para o plantão, conforme a regra de incidentes críticos.', { audit: makeAudit('classificar_criticidade', 'transferir_conversa', [draft.title ?? ''], 0.88, 'Impacto informado sugere interrupção ampla do serviço.', 'Fila crítica; agent pausado.') });
-    return makeMessage('assistant', complete ? opening : 'Conte o que aconteceu, quem é afetado e se existe um compromisso em risco hoje.', { draftCard: complete ? { ...draft } : undefined, quickReplies: complete ? undefined : ['Só eu estou afetado', 'Minha equipe está parada', 'Tenho compromisso hoje'], audit: makeAudit('preparar_chamado', 'mostrar_rascunho', [draft.category ?? '', draft.priority ?? '', draft.title ?? ''], 0.84, 'Rascunho para revisão antes de persistir; confirmação explícita obrigatória.', complete ? 'Aguardando confirmação.' : 'Aguardando dados para completar.') });
+    return makeMessage('assistant', complete ? opening : 'Conte o que aconteceu, quem é afetado e se existe um compromisso em risco hoje.', { draftCard: complete ? { ...draft } : undefined, quickReplies: complete ? undefined : ['Impede meu trabalho', 'Tenho alternativa', 'Sem urgência', 'Minha equipe está parada', 'Tenho compromisso hoje'], audit: makeAudit('preparar_chamado', 'mostrar_rascunho', [draft.category ?? '', draft.priority ?? '', draft.title ?? ''], 0.84, 'Rascunho para revisão antes de persistir; confirmação explícita obrigatória.', complete ? 'Aguardando confirmação.' : 'Aguardando dados para completar.') });
   }
   private async transfer(id: string): Promise<void> { await mutateDb(db => { const c = db.conversations.find(x => x.id === id); if (c) { c.status = 'waiting_human'; c.assignedAnalyst = undefined; c.handoffSummary = `Resumo para o analista: ${c.messages.filter(m => m.role === 'user').slice(-4).map(m => m.content).join(' → ')}${c.draft ? ` | Rascunho pendente: ${c.draft.title ?? 'dados incompletos'}; prioridade: ${c.draft.priority ?? 'a definir'}` : ''}`; c.messages.push(makeMessage('system', c.handoffSummary)); } }); }
 }

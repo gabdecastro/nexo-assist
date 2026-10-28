@@ -170,3 +170,15 @@ test('session stops after 30 employee messages even during human handoff', async
   for (let i = 1; i < 30; i++) assert.equal((await send(c.id, token, `Detalhe ${i}`)).status, 200);
   assert.equal((await send(c.id, token, 'Mensagem 31')).status, 409);
 });
+
+
+test('a missing urgency can be completed with a low-priority quick reply', async () => {
+  const { token } = await login('urgency-review@nexo.com');
+  const c = await conversation(token);
+  const initial = await send(c.id, token, 'Preciso de um monitor externo');
+  assert.equal(initial.conversation.draft.priority, undefined);
+  const updated = await send(c.id, token, 'Sem urgência');
+  assert.equal(updated.conversation.draft.priority, 'Baixa');
+  assert.ok(updated.conversation.messages.at(-1).draftCard);
+  assert.equal((await request('/tickets', token)).tickets.length, 0);
+});
