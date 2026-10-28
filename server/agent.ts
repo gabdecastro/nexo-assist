@@ -1,3 +1,5 @@
+import { Annotation, StateGraph, START, END } from '@langchain/langgraph';
+import { understand, type Understanding } from './llm.js';
 import { newId, timestamp, mutateDb, readDb } from './store.js';
 import { classifyTicket, TicketService } from './ticket-service.js';
 import type { Audit, Conversation, Draft, Message } from './types.js';
@@ -5,35 +7,56 @@ import type { Audit, Conversation, Draft, Message } from './types.js';
 const tickets = new TicketService();
 const makeMessage = (role: Message['role'], content: string, extra: Partial<Message> = {}): Message => ({ id: newId('msg'), role, content, createdAt: timestamp(), ...extra });
 
+function knownImpact(text: string): boolean { return /sem urgência|sem urgencia|não urgente|nao urgente|não consigo trabalhar|impede.*trabalh|compromisso.*hoje|reunião.*hoje|alternativa|contorno|lent[oa]|atrapalha|equipe.*parad|equipe inteira|empresa toda|todos pararam/i.test(text); }
 function categoryFrom(text: string) { return classifyTicket(text).category; }
 function makeAudit(intent: string, action: string, evidence: string[], confidence: number, reason: string, outcome: string): Audit { return { intent, action, evidence, confidence, reason, outcome }; }
 
 export class AgentService {
   async respond(conversationId: string, ownerId: string, input: string): Promise<Conversation> {
-    const conversation = await mutateDb(db => {
-      const found = db.conversations.find(c => c.id === conversationId && c.ownerId === ownerId);
-      if (!found) throw new Error('Conversa não encontrada.');
-      if (found.status === 'closed') throw new Error('Esta conversa foi encerrada. Inicie um novo atendimento.');
-      const userMessages = found.messages.filter(m => m.role === 'user').length;
-      if (userMessages >= 30) throw new Error('Esta sessão atingiu o limite de 30 mensagens. Inicie uma nova conversa para continuar.');
-      found.messages.push(makeMessage('user', input)); found.updatedAt = timestamp(); return found;
+    const State = Annotation.Root({
+      conversation: Annotation<Conversation>, interpretation: Annotation<Understanding | undefined>, reply: Annotation<Message>,
     });
-    // The employee can continue talking to the analyst while the agent is paused.
-    if (conversation.status !== 'assistant_active') return conversation;
-    const text = input.trim();
-    const lower = text.toLocaleLowerCase('pt-BR');
-    const employee = (await readDb()).employees.find(e => e.id === ownerId);
-    if (!employee) throw new Error('Funcionário não encontrado.');
-    const reply = await this.decide(conversation, employee, text, lower);
-    return mutateDb(db => {
-      const found = db.conversations.find(c => c.id === conversationId && c.ownerId === ownerId);
-      if (!found) throw new Error('Conversa não encontrada.');
-      found.messages.push(reply); found.updatedAt = timestamp();
-      return found;
-    });
+    let acquired = false;
+    const graph = new StateGraph(State)
+      .addNode('register', async () => ({ conversation: await mutateDb(db => {
+        const found = db.conversations.find(c => c.id === conversationId && c.ownerId === ownerId);
+        if (!found) throw new Error('Conversa não encontrada.');
+        if (found.status === 'closed') throw new Error('Esta conversa foi encerrada. Inicie um novo atendimento.');
+        if ((found.processingUntil ?? 0) > Date.now()) throw new Error('Aguarde a resposta anterior antes de enviar outra mensagem.');
+        if (found.messages.filter(m => m.role === 'user').length >= 30) throw new Error('Esta sessão atingiu o limite de 30 mensagens. Inicie uma nova conversa para continuar.');
+        found.processingUntil = Date.now() + 60_000;
+        found.messages.push(makeMessage('user', input)); found.updatedAt = timestamp();
+        return found;
+      }).then(c => { acquired = true; return c; }) }))
+      .addNode('interpret', async state => {
+        const text = input.trim();
+        // UI actions and pending confirmations need no probabilistic interpretation.
+        if (state.conversation.draft || /^(INC-|REQ-)/i.test(text) || /^(falar com (um )?analista|abrir chamado|consultar meus chamados|não, obrigado|adicionar informação|tirar uma dúvida)$/i.test(text)) return {};
+        try { return { interpretation: await understand(text, (await readDb()).articles, state.conversation.messages.filter(m => m.role === 'user').slice(0, -1).slice(-4).map(m => m.content)) }; }
+        catch { return { interpretation: { intent: 'uncertain' as const, articleId: '', confidence: 0, reason: 'Modelo indisponível, limite atingido ou resposta inválida.' } }; }
+      })
+      .addNode('apply_policy', async state => {
+        const employee = (await readDb()).employees.find(e => e.id === ownerId);
+        if (!employee) throw new Error('Funcionário não encontrado.');
+        return { reply: await this.decide(state.conversation, employee, input.trim(), input.trim().toLocaleLowerCase('pt-BR'), state.interpretation) };
+      })
+      .addNode('persist', async state => ({ conversation: await mutateDb(db => {
+        const found = db.conversations.find(c => c.id === conversationId && c.ownerId === ownerId)!;
+        if (state.reply) found.messages.push(state.reply);
+        found.updatedAt = timestamp(); return found;
+      }) }))
+      .addEdge(START, 'register')
+      .addConditionalEdges('register', state => state.conversation.status === 'assistant_active' ? 'interpret' : 'persist')
+      .addEdge('interpret', 'apply_policy').addEdge('apply_policy', 'persist').addEdge('persist', END).compile();
+    try { return (await graph.invoke({})).conversation; }
+    finally {
+      if (acquired) await mutateDb(db => { const c = db.conversations.find(c => c.id === conversationId); if (c) c.processingUntil = undefined; });
+    }
   }
-  private async decide(conversation: Conversation, employee: { id: string; name: string }, text: string, lower: string): Promise<Message> {
-    if (/falar com (um )?analista|quero (um )?analista|quero falar com alguém|^(atendente|humano|transferir)$/.test(lower)) {
+  private async decide(conversation: Conversation, employee: { id: string; name: string }, text: string, lower: string, interpretation?: Understanding): Promise<Message> {
+    const outside = /\b(rh|recursos humanos|reembolso|facilities|limpeza|folha de pagamento)\b/.test(lower) && !/senha|acesso|software|computador|notebook|vpn|e-mail|sistema/.test(lower);
+    if (outside || (interpretation?.intent === 'out_of_scope' && interpretation.confidence >= 0.8)) return makeMessage('assistant', 'Consigo ajudar apenas com assuntos de TI. Para esse tema, procure RH, Financeiro ou Facilities.', { audit: makeAudit('fora_de_escopo', 'redirecionar', [text], 0.99, 'Pedido não relacionado a TI.', 'Nenhuma alteração realizada.') });
+    if (/falar com (um )?analista|quero (um )?analista|quero falar com alguém|^(atendente|humano|transferir)$/.test(lower) || interpretation?.intent === 'human') {
       await this.transfer(conversation.id);
       return makeMessage('assistant', 'Encaminhei sua conversa para o service desk. O analista receberá o histórico e os chamados relacionados. Você pode acrescentar informações enquanto aguarda.', { audit: makeAudit('pedir_analista', 'transferir_conversa', [text], 0.99, 'A pessoa solicitou atendimento humano.', 'Conversa na fila; agent pausado.') });
     }
@@ -44,7 +67,7 @@ export class AgentService {
         return makeMessage('assistant', `O que você gostaria de acrescentar ao ${ticket.id}? Vou mostrar um rascunho antes de atualizar o chamado.`, { audit: makeAudit('atualizar_chamado', 'coletar_dados', [ticket.id], 0.98, 'O funcionário escolheu complementar um chamado próprio.', 'Aguardando novas informações.') });
       }
     }
-    if (/^não, obrigado[.!]?$/i.test(text)) return makeMessage('assistant', 'Tudo bem. Se precisar de mais alguma coisa de TI, é só me contar.');
+    if (/^não, obrigado[.!]?$/i.test(text)) return makeMessage('assistant', 'Tudo bem. Se precisar de mais alguma coisa de TI, é só me contar.', { audit: makeAudit('encerrar_consulta', 'aguardar', [text], 1, 'Funcionário dispensou ajuda adicional.', 'Nenhuma alteração realizada.') });
     const pending = conversation.draft;
     if (pending && /^(sim|confirmo|confirmar|confirmar e enviar|pode criar|pode abrir|isso|ok|certo|pode atualizar)$/i.test(text.trim())) {
       if (!pending.title || !pending.description || !pending.type || !pending.category || !pending.priority || !pending.affectedPerson) {
@@ -61,12 +84,16 @@ export class AgentService {
       return makeMessage('assistant', 'Tudo bem, cancelei o rascunho. Nada foi alterado.', { audit: makeAudit('cancelar_chamado', 'descartar_rascunho', [], 0.99, 'A pessoa não confirmou a ação.', 'Nenhum chamado foi alterado.') });
     }
     if (pending && !/^(sim|confirmo|confirmar|confirmar e enviar|pode criar|pode abrir|isso|ok|certo|pode atualizar|não|nao|cancelar)$/i.test(text.trim())) {
-      const choicePriority = /minha equipe está parada|equipe inteira|todos pararam/.test(lower) ? 'Crítica' : /compromisso hoje|impede meu trabalho/.test(lower) ? 'Alta' : /tenho alternativa|só eu estou afetado/.test(lower) ? 'Média' : undefined;
+      const choicePriority = /minha equipe está parada|equipe inteira|todos pararam/.test(lower) ? 'Crítica' : /compromisso hoje|impede meu trabalho/.test(lower) ? 'Alta' : /tenho alternativa/.test(lower) ? 'Média' : undefined;
       const choiceCategory = /acesso|equipamento|software/.test(lower) ? 'REQ' : undefined;
       const firstDetails = !pending.title;
+      if (firstDetails && /^(é um pedido de acesso\/equipamento|impede meu trabalho|tenho alternativa|só eu estou afetado)$/i.test(text)) {
+        await mutateDb(db => { const c = db.conversations.find(c => c.id === conversation.id)!; c.draft = { ...pending, description: text, priority: knownImpact(text) ? classifyTicket(text).priority : pending.priority }; });
+        return this.draftMessage(pending, '');
+      }
       const inferred = firstDetails ? classifyTicket(text) : undefined;
       const draft = { ...pending,
-        ...(firstDetails ? { title: text.length > 90 ? `${text.slice(0,87)}...` : text, type: inferred?.type, category: inferred?.category, priority: inferred?.priority } : {}),
+        ...(firstDetails ? { title: text.length > 90 ? `${text.slice(0,87)}...` : text, type: inferred?.type, category: inferred?.category, priority: knownImpact(`${pending.description ?? ''} ${text}`) ? classifyTicket(`${pending.description ?? ''} ${text}`).priority : undefined } : {}),
         description: firstDetails || choicePriority || choiceCategory ? (pending.description ? `${pending.description}\n${text}` : text) : `${pending.description ?? ''}\n${text}`.trim(),
         ...(choicePriority ? { priority: choicePriority as Draft['priority'] } : {}),
         ...(choiceCategory ? { type: 'REQ' as const } : {})
@@ -82,7 +109,7 @@ export class AgentService {
       await this.transfer(conversation.id);
       return makeMessage('assistant', 'Encaminhei a conversa ao service desk. Um analista poderá ver este histórico e continuar o atendimento; vou aguardar por aqui.', { audit: makeAudit('pedir_analista', 'transferir_conversa', [text], 0.99, 'A pessoa solicitou atendimento humano.', 'Fila do service desk; agent pausado.') });
     }
-    if (/^(ver )?(meus )?(chamados|tickets|status dos chamados|status)$/i.test(text.trim()) || /meus chamados|status do (meu )?chamado|chamado atrasado|chamados abertos/.test(lower)) {
+    if (/^(ver )?(meus )?(chamados|tickets|status dos chamados|status)$/i.test(text.trim()) || /meus chamados|status do (meu )?chamado|chamado atrasado|chamados abertos/.test(lower) || (interpretation?.intent === 'list' && interpretation.confidence >= 0.8)) {
       const own = await tickets.listFor(employee.id);
       return makeMessage('assistant', own.length ? `Encontrei ${own.length} chamado(s) seu(s). Selecione um para ver o status, o prazo ou falar com um analista.` : 'Você não tem chamados registrados no momento.', { quickReplies: own.map(t => t.id), audit: makeAudit('consultar_chamados', 'listar_tickets', own.map(t => `${t.id}: ${t.status}`), 0.98, 'Consulta filtrada pelo funcionário autenticado.', 'Nenhum chamado de outra pessoa foi consultado.') });
     }
@@ -94,9 +121,9 @@ export class AgentService {
       await mutateDb(db => { const c = db.conversations.find(x => x.id === conversation.id); if (c) c.draft = draft; });
       return makeMessage('assistant', 'Claro. O que aconteceu ou o que você precisa solicitar? Conte também se isso impede seu trabalho ou coloca um compromisso de hoje em risco.', { quickReplies: ['É um pedido de acesso/equipamento', 'Impede meu trabalho', 'Tenho alternativa'], audit: makeAudit('abrir_chamado', 'coletar_dados', [], 0.9, 'O funcionário iniciou um chamado; faltam detalhes para classificar corretamente.', 'Nenhum chamado criado; aguardando descrição e impacto.') });
     }
-    if (/abrir chamado|criar chamado|preciso de ajuda|problema|não funciona|nao funciona|parou|solicitar|preciso de um|preciso de acesso/.test(lower)) {
+    if (/abrir chamado|criar chamado|preciso de ajuda|problema|não funciona|nao funciona|parou|solicitar|preciso de um|preciso de acesso/.test(lower) || (interpretation?.intent === 'create' && interpretation.confidence >= 0.8)) {
       const classification = classifyTicket(text); const title = text.length > 90 ? `${text.slice(0, 87)}...` : text;
-      const draft: Draft = { title, description: text, ...classification, affectedPerson: employee.name };
+      const draft: Draft = { title, description: text, ...classification, priority: knownImpact(text) ? classification.priority : undefined, affectedPerson: employee.name };
       await mutateDb(db => { const c = db.conversations.find(x => x.id === conversation.id); if (c) c.draft = draft; });
       if (draft.priority === 'Crítica') {
         await this.transfer(conversation.id);
@@ -105,10 +132,10 @@ export class AgentService {
       return this.draftMessage(draft, 'Posso preparar esse chamado. Revise os dados e confirme antes de eu enviar ao service desk.');
     }
 
-    if (/rh|recursos humanos|financeiro|reembolso|facilities|limpeza|escritório/.test(lower)) return makeMessage('assistant', 'Consigo ajudar apenas com assuntos de TI. Para esse tema, procure a equipe responsável por RH, Financeiro ou Facilities.', { audit: makeAudit('fora_de_escopo', 'redirecionar', [text], 0.99, 'O pedido não é de suporte de TI.', 'Nenhum chamado aberto.') });
-    const db = await readDb(); const tokens = lower.split(/\W+/).filter(t => t.length > 2); const matches = db.articles.map(a => ({ article: a, score: a.tags.filter(tag => tokens.some(token => token.includes(tag) || tag.includes(token))).length + (tokens.some(t => a.title.toLowerCase().includes(t)) ? 2 : 0) })).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+    const db = await readDb(); const tokens = lower.split(/\W+/).filter(t => t.length > 2); const matches = db.articles.map(a => ({ article: a, score: a.tags.filter(tag => tokens.some(token => token.includes(tag) || tag.includes(token))).length + (tokens.some(t => a.title.toLowerCase().includes(t)) ? 2 : 0) })).map(x => ({ ...x, score: interpretation?.intent === 'knowledge' && interpretation.confidence >= 0.8 && interpretation.articleId === x.article.id ? 100 : x.score })).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
     if (matches.length) {
       const best = matches[0]!;
+      if (best.article.id === 'KB-001' && !/windows (10|11)/i.test(text)) return makeMessage('assistant', 'Você usa Windows 10 ou Windows 11? A orientação de VPN depende dessa versão.', { quickReplies: ['VPN no Windows 10', 'VPN no Windows 11'], audit: makeAudit('buscar_ajuda', 'coletar_sistema', [best.article.id], 0.9, 'O artigo tem restrição de sistema operacional.', 'Aguardando versão; nenhuma orientação incompatível enviada.') });
       if (/vpn|809|windows 11/.test(lower) && /windows 11/.test(lower)) return makeMessage('assistant', 'O artigo de VPN vale apenas para Windows 10. No Windows 11, o service desk precisa analisar o caso. Quer que eu prepare um chamado?', { quickReplies: ['Abrir chamado', 'Falar com analista'], audit: makeAudit('buscar_ajuda', 'consultar_central_e_perguntar', [best.article.id, best.article.title], 0.94, 'A orientação do artigo não cobre o Windows 11.', 'Aguardando escolha; nenhum chamado criado.') });
       return makeMessage('assistant', `${best.article.content}\n\nFonte: ${best.article.id} · ${best.article.title}`, { audit: makeAudit('tirar_duvida', 'buscar_central_de_ajuda', [best.article.id, best.article.title], Math.min(0.98, 0.76 + best.score * 0.07), 'A resposta veio do artigo mais relacionado na central de ajuda.', 'Dúvida respondida no chat sem abrir chamado.') });
     }
@@ -117,7 +144,9 @@ export class AgentService {
       await mutateDb(db => { const c = db.conversations.find(x => x.id === conversation.id); if (c) c.draft = draft; });
       return makeMessage('assistant', 'Para abrir um chamado, me conte o que parou ou o que você precisa, quem foi afetado e se isso impede o trabalho ou coloca um compromisso de hoje em risco.', { quickReplies: ['Impede meu trabalho', 'Tenho alternativa', 'É um pedido de acesso/equipamento'], audit: makeAudit('abrir_chamado', 'coletar_dados', [], 0.78, 'Preciso de contexto para classificar e evitar chamado incompleto.', 'Aguardando descrição e impacto.') });
     }
-    return makeMessage('assistant', 'Entendi. Posso buscar uma orientação, consultar seus chamados ou preparar um novo chamado. O que você prefere?', { quickReplies: ['Consultar meus chamados', 'Abrir chamado', 'Falar com analista'], audit: makeAudit('classificar_mensagem', 'pedir_esclarecimento', [text], 0.52, 'Ainda não há segurança suficiente para escolher uma ação.', 'Nenhuma alteração realizada.') });
+    if (/^(oi|olá|ola|bom dia|boa tarde|tirar uma dúvida)$/i.test(text)) return makeMessage('assistant', 'Qual é sua dúvida de TI? Conte o que está acontecendo.', { quickReplies: ['Consultar meus chamados', 'Abrir chamado', 'Falar com analista'], audit: makeAudit('iniciar_ajuda', 'coletar_contexto', [text], 1, 'Pessoa iniciou a ajuda sem descrever o caso.', 'Aguardando descrição.') });
+    await this.transfer(conversation.id);
+    return makeMessage('assistant', 'Não tenho segurança suficiente para orientar esse caso. Encaminhei a conversa a um analista com o histórico; você pode acrescentar detalhes enquanto aguarda.', { audit: makeAudit('classificar_mensagem', 'transferir_conversa', [text], interpretation?.confidence ?? 0.4, interpretation?.reason ?? 'Sem evidência suficiente na central de ajuda ou nas regras.', 'Conversa na fila por baixa confiança; agent pausado.') });
   }
   private draftMessage(draft: Draft, opening: string): Message {
     const complete = Boolean(draft.title && draft.description && draft.type && draft.category && draft.priority && draft.affectedPerson);
@@ -125,5 +154,5 @@ export class AgentService {
     if (priority === 'Crítica') return makeMessage('assistant', 'A equipe parece parada. Vou encaminhar o caso como prioridade crítica para o plantão, conforme a regra de incidentes críticos.', { audit: makeAudit('classificar_criticidade', 'transferir_conversa', [draft.title ?? ''], 0.88, 'Impacto informado sugere interrupção ampla do serviço.', 'Fila crítica; agent pausado.') });
     return makeMessage('assistant', complete ? opening : 'Conte o que aconteceu, quem é afetado e se existe um compromisso em risco hoje.', { draftCard: complete ? { ...draft } : undefined, quickReplies: complete ? undefined : ['Só eu estou afetado', 'Minha equipe está parada', 'Tenho compromisso hoje'], audit: makeAudit('preparar_chamado', 'mostrar_rascunho', [draft.category ?? '', draft.priority ?? '', draft.title ?? ''], 0.84, 'Rascunho para revisão antes de persistir; confirmação explícita obrigatória.', complete ? 'Aguardando confirmação.' : 'Aguardando dados para completar.') });
   }
-  private async transfer(id: string): Promise<void> { await mutateDb(db => { const c = db.conversations.find(x => x.id === id); if (c) { c.status = 'waiting_human'; c.assignedAnalyst = undefined; } }); }
+  private async transfer(id: string): Promise<void> { await mutateDb(db => { const c = db.conversations.find(x => x.id === id); if (c) { c.status = 'waiting_human'; c.assignedAnalyst = undefined; c.handoffSummary = `Resumo para o analista: ${c.messages.filter(m => m.role === 'user').slice(-4).map(m => m.content).join(' → ')}${c.draft ? ` | Rascunho pendente: ${c.draft.title ?? 'dados incompletos'}; prioridade: ${c.draft.priority ?? 'a definir'}` : ''}`; c.messages.push(makeMessage('system', c.handoffSummary)); } }); }
 }

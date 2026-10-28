@@ -81,6 +81,7 @@ app.post('/api/analyst/conversations/:id/:action', analystOnly, async (req, res)
   try {
     const conversation = await mutateDb(db => {
       const c = db.conversations.find(x => x.id === String(req.params.id)); if (!c) throw new Error('Conversa não encontrada.');
+      if ((c.processingUntil ?? 0) > Date.now() && action !== 'reply') throw new Error('Aguarde o processamento da mensagem em andamento.');
       if (action === 'take') { if (c.status !== 'waiting_human') throw new Error('Esta conversa não está aguardando atendente.'); c.status = 'human_active'; c.assignedAnalyst = 'Rafael Lima'; c.messages.push({ id: newId('msg'), role: 'system', content: 'Rafael Lima assumiu · agent pausado', createdAt: timestamp() }); }
       if (action === 'return') { if (c.status !== 'human_active' && c.status !== 'waiting_human') throw new Error('Esta conversa já não está com o atendimento humano.'); c.status = 'assistant_active'; c.assignedAnalyst = undefined; c.messages.push({ id: newId('msg'), role: 'system', content: 'Conversa devolvida ao Nexo Assist', createdAt: timestamp() }); }
       if (action === 'close') { if (c.status !== 'human_active') throw new Error('Assuma o atendimento antes de encerrá-lo.'); c.status = 'closed'; c.assignedAnalyst = 'Rafael Lima'; c.messages.push({ id: newId('msg'), role: 'system', content: 'Atendimento encerrado por Rafael Lima', createdAt: timestamp() }); }

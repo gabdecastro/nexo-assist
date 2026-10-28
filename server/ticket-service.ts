@@ -6,7 +6,7 @@ export function classifyTicket(text: string): { type: TicketType; category: Cate
   const s = text.toLocaleLowerCase('pt-BR');
   const type: TicketType = /solicit|preciso de|quero um|pedir|acesso|equipamento|licença/.test(s) && !/parou|erro|não funciona|falha/.test(s) ? 'REQ' : 'INC';
   const category: Category = /vpn|wi-?fi|rede|internet/.test(s) ? 'Rede e VPN' : /senha|acesso|login|sap/.test(s) ? 'Acesso' : /notebook|computador|monitor|teclado/.test(s) ? 'Hardware' : /email|e-mail|outlook/.test(s) ? 'E-mail' : /software|aplicativo|licença|figma/.test(s) ? 'Software' : 'Outros';
-  const priority: Priority = /empresa toda|equipe inteira|equipe toda|todos pararam|sistema fora para todos/.test(s) ? 'Crítica' : /não consigo trabalhar|impede.*trabalhar|reunião hoje|compromisso hoje/.test(s) ? 'Alta' : /alternativa|contorno|lento|atrapalha/.test(s) ? 'Média' : 'Baixa';
+  const priority: Priority = /empresa toda|equipe inteira|equipe toda|equipe.*parada|todos pararam|sistema fora para todos/.test(s) ? 'Crítica' : /não consigo trabalhar|impede.*trabalh|reunião hoje|compromisso hoje/.test(s) ? 'Alta' : /alternativa|contorno|lento|atrapalha/.test(s) ? 'Média' : 'Baixa';
   return { type, category, priority };
 }
 type CompleteDraft = Required<Omit<Draft, 'existingTicketId'>> & Pick<Draft, 'existingTicketId'>;

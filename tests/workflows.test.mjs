@@ -12,7 +12,7 @@ let base;
 
 async function start() {
   server = spawn(process.execPath, ['dist-server/index.js'], {
-    env: { ...process.env, PORT: '0', DATA_FILE: join(directory, 'db.json'), SESSION_SECRET: 'integration-test-only' },
+    env: { ...process.env, PORT: '0', GEMINI_API_KEY: '', DATABASE_URL: '', VERCEL: '', LEGACY_OUTAGE_MS: '0', DATA_FILE: join(directory, 'db.json'), SESSION_SECRET: 'integration-test-only' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   base = await new Promise((resolve, reject) => {
@@ -114,4 +114,37 @@ test('human handoff supports two-way messages, return, close and restart', async
   const restored = (await request('/conversations', employee.token)).conversations.find(item => item.id === c.id);
   assert.equal(restored.status, 'closed');
   assert.equal(restored.messages.length, closed.conversation.messages.length);
+});
+
+
+test('out-of-scope requests never become tickets and unknown cases carry a handoff summary', async () => {
+  const { token } = await login('scope-review@nexo.com');
+  const c = await conversation(token);
+  const outside = await send(c.id, token, 'Preciso de ajuda com reembolso de viagem');
+  assert.equal(outside.conversation.draft, undefined);
+  assert.equal(outside.conversation.messages.at(-1).audit.action, 'redirecionar');
+  const unsure = await send(c.id, token, 'O fluxo xyz retorna valor inesperado QJZ');
+  assert.equal(unsure.conversation.status, 'waiting_human');
+  assert.match(unsure.conversation.handoffSummary, /QJZ/);
+});
+
+test('impact is required before confirmation and critical cases go to the human queue', async () => {
+  const { token } = await login('impact-review@nexo.com');
+  const c = await conversation(token);
+  await send(c.id, token, 'Meu teclado não funciona');
+  const incomplete = await send(c.id, token, 'Confirmar e enviar');
+  assert.equal(incomplete.conversation.messages.at(-1).ticketCard, undefined);
+  assert.equal((await request('/tickets', token)).tickets.length, 0);
+  const critical = await send(c.id, token, 'Minha equipe está parada');
+  assert.equal(critical.conversation.status, 'waiting_human');
+  assert.equal((await request('/tickets', token)).tickets.length, 0);
+});
+
+test('VPN answer checks operating system applicability', async () => {
+  const { token } = await login('kb-review@nexo.com');
+  const c = await conversation(token);
+  const question = await send(c.id, token, 'VPN erro 809');
+  assert.match(question.conversation.messages.at(-1).content, /Windows 10 ou Windows 11/);
+  const reply = await send(c.id, token, 'VPN no Windows 11');
+  assert.match(reply.conversation.messages.at(-1).content, /service desk precisa analisar/);
 });

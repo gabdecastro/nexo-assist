@@ -14,7 +14,7 @@ const employees: Employee[] = [
   { id: 'emp-paulo', name: 'Paulo Mendes', email: 'paulo.mendes@nexo.com', department: 'Engenharia' }
 ];
 const articles: HelpArticle[] = [
-  { id: 'KB-001', title: 'VPN com erro 809', content: 'Reinstale o cliente de VPN pelo portal de softwares e reinicie o computador. No Windows 11, abra um chamado para o suporte.', tags: ['vpn', 'rede', '809'] },
+  { id: 'KB-001', title: 'VPN com erro 809', content: 'No Windows 10, reinstale o cliente de VPN pelo portal de softwares e reinicie o computador. No Windows 11, abra um chamado para o suporte.', tags: ['vpn', 'rede', '809'] },
   { id: 'KB-002', title: 'Horário do service desk', content: 'Atendimento de segunda a sexta, das 8h às 18h. Chamados críticos têm plantão 24 horas.', tags: ['horário', 'atendimento', 'plantão'] },
   { id: 'KB-003', title: 'Redefinir senha corporativa', content: 'Acesse o portal de identidade, escolha “Esqueci minha senha” e confirme pelo aplicativo autenticador.', tags: ['senha', 'acesso', 'login'] },
   { id: 'KB-004', title: 'Configurar e-mail no celular', content: 'Instale o Microsoft Outlook pela loja corporativa e entre com seu e-mail Nexo. Não configure a conta em apps de terceiros.', tags: ['email', 'e-mail', 'celular'] },
