@@ -6,7 +6,7 @@ Service desk de demonstração com chat, triagem auditável em LangGraph.js, int
 
 ## Executar
 
-Requisitos: Node.js 22+ e npm.
+Requisitos: Node.js 22.x e npm.
 
 ```bash
 npm ci
@@ -92,6 +92,19 @@ O projeto inclui [vercel.json](vercel.json), função em `api/index.ts` e adapta
 
 Proteções para a demonstração: até 30 mensagens/conversa, 10 novas conversas por funcionário/24h, até 100 chamadas LLM/dia por padrão, contexto de quatro mensagens anteriores, saída de 350 tokens e timeout de 10s. O teto do modelo é persistido no mesmo banco e funciona entre instâncias. São limites de aplicação, não garantia de gasto zero fora do free tier nem proteção completa contra abuso.
 
+## Neon CLI e teste real do banco
+
+O projeto também possui `neon.ts` (PostgreSQL, mantendo a autenticação atual) e vínculo local em `.neon`, ignorado pelo Git. O CLI pode ser usado por `npx --yes neon`; não exige instalação global. O servidor carrega `.env.local` gerado pelo CLI e depois `.env`, preservando as variáveis já injetadas no processo. `DATABASE_URL` alimenta o adaptador existente; `DATABASE_URL_UNPOOLED` fica disponível para ferramentas administrativas e `NEON_BRANCH` identifica o branch.
+
+```bash
+npx --yes neon deploy
+npm run test:neon
+```
+
+`neon deploy` aplica a configuração dos serviços Neon e atualiza as variáveis locais; não publica o frontend ou a API Express. `test:neon` é um teste opt-in que usa o banco configurado: cria dois funcionários temporários, exercita login, confirmação de chamado, privacidade, persistência após reinício e handoff, depois remove somente seus registros. Não executa Gemini nem faz parte do CI offline. Execute com um banco no qual esteja autorizado a criar dados de teste.
+
+O teste ponta a ponta de PostgreSQL foi executado com sucesso na configuração solicitada. O [registro da instalação e validação](docs/neon-setup.md) descreve mudanças, saídas e a falha de build corrigida. A conexão do MCP no cliente é independente do login do CLI; o plugin já está instalado, mas pode ser necessário recarregar o cliente para carregar suas ferramentas.
+
 ## Trade-offs e próximos passos
 
 - O calendário considera segunda–sexta, 08h–18h, UTC−03; um dia útil equivale a dez horas de atendimento. Não há feriados. Críticos vencem em uma hora corrida, inclusive fins de semana.
@@ -100,4 +113,4 @@ Proteções para a demonstração: até 30 mensagens/conversa, 10 novas conversa
 - A gravação do ticket e a persistência da resposta do agente ainda ocorrem em operações separadas. Uma interrupção entre elas pode exigir consultar o ticket e reconciliar a conversa; uma próxima evolução deve adicionar recibos idempotentes/transação de confirmação.
 - O login de funcionário com qualquer senha é exclusivamente demonstrativo. Tokens assinados isolam as contas, mas não comprovam identidade; em produção seria necessário SSO, funções e autenticação forte.
 - A falha simulada do legado ocorre antes da escrita e tenta recuperação com backoff limitado. Falhas de rede de resultado incerto não são repetidas automaticamente pelo armazenamento remoto.
-- O modelo tem contrato e fallback testados com mocks. Ainda faltam avaliação semântica com casos reais anonimizados, teste real Neon/Vercel e medição de latência. A confiança do modelo é declarada, não uma probabilidade calibrada.
+- O modelo tem contrato e fallback testados com mocks. Ainda faltam avaliação semântica com casos reais anonimizados, teste de hospedagem Vercel e medição de latência. PostgreSQL Neon já foi validado pelo teste opt-in descrito acima. A confiança do modelo é declarada, não uma probabilidade calibrada.
