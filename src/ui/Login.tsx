@@ -4,8 +4,8 @@ import { api, errorMessage, type Employee, type Session } from './api';
 import { ErrorBanner, Logo, Modal, PasswordHelp } from './components/Common';
 
 export default function Login({ onLogin }: { onLogin: (session: Session, remember: boolean) => void }) {
-  const [email, setEmail] = useState('ana.souza@nexo.com.br');
-  const [password, setPassword] = useState('nexo2026');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [analyst, setAnalyst] = useState(location.pathname === '/analyst');
   const [visiblePassword, setVisiblePassword] = useState(false);
   const [remember, setRemember] = useState(true);
