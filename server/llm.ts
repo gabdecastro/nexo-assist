@@ -25,7 +25,7 @@ export async function understand(input: string, articles: HelpArticle[], context
     budget.calls++; db.modelUsage = budget; return true;
   });
   if (!allowed) throw new Error('Limite diário do modelo atingido.');
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+  const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST', signal: AbortSignal.timeout(10_000),
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },

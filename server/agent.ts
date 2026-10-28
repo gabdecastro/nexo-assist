@@ -39,7 +39,7 @@ export class AgentService {
         const employee = (await readDb()).employees.find(e => e.id === ownerId);
         if (!employee) throw new Error('Funcionário não encontrado.');
         const reply = await this.decide(state.conversation, employee, input.trim(), input.trim().toLocaleLowerCase('pt-BR'), state.interpretation);
-        if (reply.audit && state.interpretation) reply.audit.evidence.push(`Triagem Gemini (${process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite'}): ${state.interpretation.intent}, confiança ${state.interpretation.confidence}; ${state.interpretation.reason}`);
+        if (reply.audit && state.interpretation) reply.audit.evidence.push(`Triagem Gemini (${process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite'}): ${state.interpretation.intent}, confiança ${state.interpretation.confidence}; ${state.interpretation.reason}`);
         return { reply };
       })
       .addNode('persist', async state => ({ conversation: await mutateDb(db => {

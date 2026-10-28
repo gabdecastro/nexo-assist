@@ -84,7 +84,7 @@ Todas as variáveis estão em [.env.example](.env.example):
 | `SESSION_SECRET` | Assinatura de sessões de 24h. Obrigatório na Vercel, mínimo 32 caracteres. |
 | `ANALYST_PASSWORD` | Senha de acesso ao console. Obrigatória na Vercel, mínimo 16 caracteres. |
 | `ALLOW_DEMO_SIGNUP` | Permitir novos perfis locais. Na Vercel, sempre desativado. |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Provedor e modelo; padrão `gemini-2.5-flash-lite`. |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Provedor e modelo; padrão `gemini-3.5-flash-lite`. |
 | `LLM_DAILY_LIMIT` | Teto de chamadas por dia UTC, persistido e compartilhado; padrão 100, zero bloqueia. |
 | `LEGACY_OUTAGE_MS` | Indisponibilidade simulada após iniciar cada processo; padrão zero. Use 2000 para exercitar recuperação. |
 
