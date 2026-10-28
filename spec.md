@@ -1,6 +1,6 @@
 # Nexo Assist — Especificação do produto
 
-**Status:** protótipo implementado; interface revisada a partir do arquivo Pen  
+**Status:** implementação em revisão de aderência; evidências em `docs/review.md`  
 **Fonte de requisitos:** `Desafio_Tecnico_Nexo_Assist_PRD_v5.pdf` (PRD, anexos A–C).  
 **Referência visual:** `design/nexo.pen`, extraído do `nexo.zip` fornecido pelo usuário.  
 **Objetivo:** construir um assistente de service desk de TI que resolva dúvidas no chat, consulte e mantenha chamados sem duplicidade e transfira conversas para analistas quando solicitado ou necessário.
@@ -20,7 +20,8 @@
 
 ### Fora do escopo
 
-- Integração com modelo/provedor externo, SSO, notificações, banco remoto e deploy público.
+- SSO corporativo, notificações externas e operação produtiva para 2.000 funcionários.
+- Publicar o deploy é opcional; preparar a configuração não significa publicar.
 - Autenticação de produção. O login solicitado pelo desafio é deliberadamente de demonstração.
 
 ## 2. Papéis e permissões
@@ -102,7 +103,9 @@ O modo analista de demonstração é acessado em `/analyst`. A interface do func
 - Sem chave secreta embutida no cliente. `.env.example` documenta configuração.
 - Tratamento de erro nas chamadas ao serviço de tickets simulado.
 - Inicialização local com poucos comandos e instruções no README.
-- Respostas determinísticas locais evitam custo e latência de LLM; decisões e regras são inspecionáveis.
+- Orquestração do agent com Mastra ou LangGraph.js e integração com um provedor de LLM, conforme o PDF. Regras de autorização, confirmação e escrita permanecem verificadas pelo servidor.
+- Modo sem chave pode existir para demonstração/testes, mas não substitui a avaliação do caminho com LLM.
+- Eficiência: limitar contexto, saída e chamadas ao modelo; falhas não podem descartar rascunhos.
 
 ## 7. Modelo de dados
 
@@ -128,7 +131,7 @@ React + Vite para interface; API HTTP Node/Express em TypeScript; `AgentService`
 8. O console expõe contexto, histórico, tickets e auditoria suficiente para entender decisões.
 9. Limite de mensagens é respeitado e erro do serviço simulado é visível sem descarte do texto enviado.
 
-## 10. Decisões e pendências
+## 10. Decisões e limites
 
 - A referência inicial do Anexo C foi substituída pelo arquivo completo `nexo.pen`, fornecido em 28/10/2026. Seus dados ilustrativos não substituem os dados reais da sessão.
 - O cálculo de prazo ainda usa horas corridas. O calendário de segunda–sexta, 08h–18h e feriados permanece pendente.
