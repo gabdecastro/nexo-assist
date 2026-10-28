@@ -6,3 +6,5 @@ data/
 .env.*
 DEPLOY_VERCEL.local.md
 .git/
+.neon
+scripts/
