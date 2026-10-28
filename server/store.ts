@@ -1,3 +1,5 @@
+import { createNeonStore } from './neon-store.js';
+import { mutateSnapshot } from './snapshot-store.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { Database, Employee, HelpArticle, Ticket } from './types.js';
@@ -31,18 +33,22 @@ const tickets: Ticket[] = [
   { id: 'INC-20702', ownerId: 'emp-paulo', affectedPerson: 'Paulo Mendes', title: 'E-mail não sincroniza', description: 'Caixa de entrada não atualiza.', type: 'INC', category: 'E-mail', priority: 'Média', status: 'Aberto', createdAt: ago(3), updatedAt: ago(2), dueAt: due(18), history: ['Chamado criado'] }
 ];
 
+const seed = (): Database => structuredClone({ employees, articles, tickets, conversations: [] });
+const remote = process.env.DATABASE_URL ? createNeonStore(process.env.DATABASE_URL, seed) : undefined;
+if (process.env.VERCEL && !remote) throw new Error('DATABASE_URL é obrigatório na Vercel; arquivo local não é persistente.');
+
 async function ensureFile(): Promise<void> {
   try { await readFile(dataPath, 'utf8'); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     await mkdir(dirname(dataPath), { recursive: true });
-    const seed: Database = { employees, articles, tickets, conversations: [] };
-    try { await writeFile(dataPath, JSON.stringify(seed, null, 2), { encoding: 'utf8', flag: 'wx' }); }
+    const initial = seed();
+    try { await writeFile(dataPath, JSON.stringify(initial, null, 2), { encoding: 'utf8', flag: 'wx' }); }
     catch (cause) { if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause; }
   }
 }
-export async function readDb(): Promise<Database> { await ensureFile(); return JSON.parse(await readFile(dataPath, 'utf8')) as Database; }
-export async function writeDb(db: Database): Promise<void> {
+export async function readDb(): Promise<Database> { if (remote) return (await remote.read()).data; await ensureFile(); return JSON.parse(await readFile(dataPath, 'utf8')) as Database; }
+async function writeDb(db: Database): Promise<void> {
   await mkdir(dirname(dataPath), { recursive: true });
   const tmp = `${dataPath}.tmp`;
   await writeFile(tmp, JSON.stringify(db, null, 2), 'utf8');
@@ -52,6 +58,7 @@ export async function writeDb(db: Database): Promise<void> {
 let mutationQueue: Promise<void> = Promise.resolve();
 export function mutateDb<T>(fn: (db: Database) => T | Promise<T>): Promise<T> {
   const operation = mutationQueue.then(async () => {
+    if (remote) return mutateSnapshot(remote, fn);
     const db = await readDb(); const result = await fn(db); await writeDb(db); return result;
   });
   mutationQueue = operation.then(() => {}, () => {});
