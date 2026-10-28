@@ -1,69 +1,99 @@
 # Nexo Assist
 
-Protótipo local de service desk com chat para funcionários, agent de TI auditável, serviço simulado de chamados e console de analista.
+Service desk de demonstração com chat, triagem auditável em LangGraph.js, integração Gemini, serviço simulado de chamados e console de analista. Implementado a partir de [spec.md](spec.md) e das seis telas de [nexo.pen](design/nexo.pen).
 
-## Rodar localmente
+## Executar
 
-Requisitos: Node.js 20 ou mais recente e npm.
+Requisitos: Node.js 22+ e npm.
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 npm run dev
 ```
 
-Abra <http://localhost:5173>. O primeiro acesso cria `data/db.json` com funcionários, artigos e chamados de demonstração. Esse arquivo persiste conversas, rascunhos, estado de atendimento e tickets entre reinícios. Para reiniciar a demonstração do zero, pare o servidor e remova `data/db.json`.
-
-Entre como funcionário com `ana.souza@nexo.com.br` e qualquer senha; o endereço anterior `ana.souza@nexo.com` é aceito como alias da mesma conta. Também há `marcos.lima@nexo.com`, `julia.costa@nexo.com` e `paulo.mendes@nexo.com`. E-mails desconhecidos criam perfis isolados de demonstração. Use “Acessar console do analista” ou abra `/analyst` para acessar como Rafael Lima, Suporte N2 (qualquer senha).
-
-Para compilar a aplicação: `npm run build`. Em desenvolvimento, Vite atende a interface e encaminha `/api` para Express na porta 3001.
-
-## Arquitetura
-
-- `src/ui/Login.tsx`, `EmployeeWorkspace.tsx`, `AnalystWorkspace.tsx`: telas React de login, chat/perfil e console.
-- `src/ui/components`: logo vetorial, elementos comuns, decisões, seleção de tickets e rascunho editável.
-- `src/ui/styles.css`: tokens e layout extraídos de `design/nexo.pen`, com adaptação para celular.
-- `server/agent.ts`: classificador e fluxo determinístico; mantém contexto de rascunhos e produz auditoria para cada decisão.
-- `server/ticket-service.ts`: serviço de chamados separado do agent, com classificação, deduplicação, atualização, reabertura e prazo.
-- `server/store.ts`: persistência JSON atômica, com dados iniciais de exemplo.
-- `server/index.ts`: API HTTP, validação das sessões assinadas e autorização por papel. As rotas de funcionário filtram chamados no servidor pela identidade da sessão.
-- `spec.md`: requisitos, histórias, regras, arquitetura e critérios de aceite que conduziram a implementação.
-- `design/nexo.pen`: referência visual fornecida pelo usuário, com seis telas; apenas o identificador de compartilhamento foi removido.
-- `tests/workflows.test.mjs`: testes de integração dos fluxos de interface/API, usando dados temporários isolados.
-
-## Como o agent decide
-
-O protótipo usa regras locais explícitas, sem chamada a LLM ou custo por mensagem. A ordem é: validar estado e limite da conversa; respeitar pedido humano mesmo durante a preparação de um rascunho; resolver confirmação/cancelamento; tratar consulta de tickets próprios; reconhecer abertura de chamado e classificar tipo/categoria/prioridade; redirecionar assuntos fora de TI; buscar o artigo com melhor correspondência de tags; por fim, pedir esclarecimento. Um ticket completo nunca é persistido sem confirmação explícita. O serviço detecta sobreposição com tickets abertos para atualizar em vez de duplicar e reconhece resolvidos nos últimos sete dias.
-
-As decisões do agent incluem intenção, ação, evidências, nível de confiança, motivo e resultado. Clique nas ações acima da resposta para expandir o detalhe. Na consulta, o usuário primeiro escolhe seu chamado e recebe a oferta de transferência se o prazo estiver vencido, conforme o Pen. Pedidos explícitos de analista e casos críticos são transferidos. Durante a fila/atendimento humano, mensagens do funcionário são salvas para o analista, sem resposta automática do agent.
-
-## Interface e verificação
-
-O arquivo Pen orienta as seis telas: identificação, novo chamado, consulta/transferência, console aguardando, console assumido e perfil. A interface usa o logo vetorial original, azul de ação `#0062C4` e as fontes Schibsted Grotesk, Newsreader e IBM Plex Mono, servidas localmente via Fontsource. Não depende de Google Fonts em tempo de execução.
-
-O perfil exibe os dados da sessão. O botão de recuperação orienta ligar no ramal 4000 e explica que o ambiente não envia e-mails. Os indicadores do login são exemplos do protótipo, não métricas de produção.
+Abra <http://localhost:5173>. Para executar o build com frontend e API no mesmo servidor:
 
 ```bash
 npm run build
+npm start
+```
+
+Abra <http://localhost:3001>. A persistência local é criada em `data/db.json`. Conversas, rascunhos, tickets, auditoria e estado humano sobrevivem ao reinício. Para zerar somente a demonstração local, pare o servidor e remova esse arquivo.
+
+Funcionários: `ana.souza@nexo.com.br` (alias de `ana.souza@nexo.com`), `marcos.lima@nexo.com`, `julia.costa@nexo.com` e `paulo.mendes@nexo.com`; qualquer senha não vazia, conforme o desafio. Localmente, outros e-mails criam perfis isolados quando `ALLOW_DEMO_SIGNUP` não é `false`. Na Vercel, o cadastro fica desativado. O console está em `/analyst`: use `ANALYST_PASSWORD`, ou qualquer senha apenas no modo local sem essa configuração.
+
+## Spec driven development e revisão
+
+A [spec](spec.md) define histórias, regras, critérios de aceite e tokens visuais. A [revisão do desafio](docs/review.md) relaciona os requisitos às evidências e limitações. O PDF é a fonte das regras; o Pen orienta a interface. A revisão corrigiu a exclusão indevida do LLM na spec inicial, além de SLA, contexto, deduplicação e persistência para serverless.
+
+O repositório estava sem histórico. Os primeiros 14 commits organizam os arquivos existentes em etapas lógicas, com datas reais; não são versões antigas recuperadas. Os commits seguintes registram as correções efetivamente realizadas durante a revisão.
+
+## Arquitetura
+
+| Camada | Responsabilidade |
+|---|---|
+| `src/ui` | React/Vite: login, conversa, perfil, fila e console. Estilos/fontes locais derivados do Pen. |
+| `server/app.ts` | Express 5: sessões assinadas, autorização, validação, API e frontend estático. |
+| `server/index.ts` / `api/index.ts` | Listener local / export da função Vercel, respectivamente. |
+| `server/agent.ts` | Grafo LangGraph: registrar → interpretar → aplicar política → persistir. Conversas humanas pulam a interpretação. |
+| `server/llm.ts` | Gemini REST, contrato JSON validado, contexto limitado, timeout e orçamento diário. |
+| `server/ticket-service.ts` | Serviço legado simulado: consulta, criação, atualização, reabertura, deduplicação e indisponibilidade. |
+| `server/sla.ts` | Calendário de atendimento e plantão crítico. |
+| `server/store.ts` | Repositório: JSON atômico local ou Neon quando `DATABASE_URL` existe. |
+| `server/neon-store.ts` / `snapshot-store.ts` | Snapshot PostgreSQL com versão e atualização condicional para evitar perda por concorrência. |
+
+Há quatro funcionários, sete artigos e seis chamados iniciais, incluindo vencido, resolvido recentemente e tickets de outras pessoas. Todas as consultas de funcionário são filtradas pela identidade assinada no servidor.
+
+## Como o agente decide
+
+1. Registra a mensagem e valida identidade, estado, processamento concorrente e limite de 30 mensagens.
+2. Mensagens durante atendimento humano são persistidas sem resposta automática. Botões e confirmações de rascunho não precisam de LLM.
+3. Com `GEMINI_API_KEY`, o modelo interpreta texto livre em um conjunto fechado de intenções e pode indicar um artigo existente. A saída é validada; ele não executa ferramentas de escrita nem decide se uma confirmação ocorreu.
+4. As regras verificam escopo de TI, pedido humano, confirmação/cancelamento, consulta de tickets próprios, impacto/urgência e aplicabilidade dos artigos. Sem impacto suficiente, o rascunho permanece incompleto. Artigo de VPN exige verificar Windows 10/11.
+5. Criar/atualizar exige confirmação explícita de rascunho completo. O serviço busca problema equivalente no mesmo tipo/categoria; reabre resolvidos até sete dias e preserva histórico. Identificadores são alocados na mutação persistente.
+6. Pedido humano, caso crítico ou ausência de orientação segura transferem com resumo e histórico. Na consulta de ticket vencido, a interface oferece transferência, seguindo a tela 3 do Pen. Essa interpretação é registrada na revisão porque o Anexo A também pode ser lido como transferência automática.
+7. Cada decisão inclui intenção, ação, evidências, confiança, motivo e resultado; quando há interpretação do modelo, a evidência identifica Gemini/modelo e sua classificação. A justificativa é breve e verificável, não uma exposição de raciocínio interno.
+
+Escolhi **LangGraph.js** por permitir um grafo explícito e tipado mantendo as políticas isoladas do modelo. **Gemini Flash-Lite** oferece um modelo pequeno com suporte a JSON estruturado e free tier para demonstração. A disponibilidade e as cotas devem ser verificadas na [documentação do provedor](https://ai.google.dev/gemini-api/docs/pricing). Sem chave, o grafo funciona em modo determinístico para exploração e testes; esse modo sozinho não demonstra o requisito de LLM.
+
+## Qualidade e testes
+
+```bash
 npm run test:integration
 ```
 
-Os testes iniciam a API em uma porta temporária, usam outro arquivo de persistência e o removem ao concluir. Cobrem autorização de chamados/rascunhos, edição sem criação prematura, confirmação, handoff, mensagens simultâneas, encerramento e persistência após reinício.
+Esse comando compila frontend/backend/entrada serverless e executa a suíte Node. Os testes usam dados e portas temporários; não alteram a demonstração nem consomem APIs reais. Cobrem privacidade, confirmações, edição, handoff, concorrência, reinício, SLA, reabertura, indisponibilidade, escopo, impacto, aplicabilidade da VPN, limites de sessão, contrato Gemini, orçamento e roteamento semântico pelo grafo.
 
-## Qualidade, segurança e trade-offs
+Para validar o LLM real, configure a chave, inicie uma conversa e pergunte “Quais registros de suporte existem em meu nome?”. Expanda a auditoria: deve conter “Triagem Gemini”, a intenção e a evidência, além dos tickets próprios. Teste também uma dúvida de senha e um caso ambíguo. Uma resposta apenas determinística ou um erro do provedor não valida esse caminho. Não foi feita avaliação com chave real nesta revisão.
 
-- TypeScript estrito, módulos separados e limite de tamanho/validação nos endpoints de mensagem.
-- Token de sessão assinado pelo servidor; funcionário não escolhe `ownerId` no corpo da consulta de tickets. Sessões demo duram no navegador e são verificadas em cada rota.
-- Serviço legado simulado lê/grava JSON; gravação por arquivo temporário + rename evita substituição parcial, e uma fila serializa mutações dentro do processo. Não é banco multi-instância nem substitui transações/backup.
-- A interface demonstra login por qualquer senha, conforme o desafio. Esse comportamento e o login simplificado de analista são apenas demonstração, não autenticação de produção.
-- A prioridade e correspondência são determinísticas e baratas, mas não têm a flexibilidade semântica de um LLM. Casos ambíguos pedem esclarecimento; em uma próxima etapa eu adicionaria um classificador estruturado com saída validada, avaliações offline das regras, telemetria sem dados sensíveis e fallback para analista.
-- Prazos são aproximados no protótipo. O cálculo simples usa horas corridas; produção precisaria de calendário de dias úteis/feriados, relógio de SLA por atualização e política de plantão.
-- O Pen foi fornecido como arquivo e está em `design/nexo.pen`. Adaptações necessárias para dados reais, telas pequenas e recuperação de senha estão descritas na spec.
+A interface conserva os seis layouts do Pen, incluindo rascunho editável, auditoria e estados de carregamento/erro. Atualizações entre funcionário/analista usam polling de três segundos; não há streaming por token. O perfil mostra dados reais da sessão, mas recuperação de senha apenas orienta o contato com a TI. Indicadores do login são ilustrativos.
 
-## Configuração
+## Configuração e deploy
 
-Copie `.env.example` para `.env`. `PORT` escolhe a porta da API e `DATA_FILE` pode apontar o arquivo de persistência. `SESSION_SECRET` pode ser definido com um valor aleatório para trocar a chave de assinatura local. Não coloque chaves no código ou no cliente.
+Todas as variáveis estão em [.env.example](.env.example):
 
-## Próximos passos
+| Variável | Uso |
+|---|---|
+| `PORT`, `DATA_FILE` | Porta e arquivo do desenvolvimento local. |
+| `DATABASE_URL` | PostgreSQL Neon; obrigatório na Vercel. O schema/seed é inicializado no primeiro acesso. |
+| `SESSION_SECRET` | Assinatura de sessões de 24h. Obrigatório na Vercel, mínimo 32 caracteres. |
+| `ANALYST_PASSWORD` | Senha de acesso ao console. Obrigatória na Vercel, mínimo 16 caracteres. |
+| `ALLOW_DEMO_SIGNUP` | Permitir novos perfis locais. Na Vercel, sempre desativado. |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Provedor e modelo; padrão `gemini-2.5-flash-lite`. |
+| `LLM_DAILY_LIMIT` | Teto de chamadas por dia UTC, persistido e compartilhado; padrão 100, zero bloqueia. |
+| `LEGACY_OUTAGE_MS` | Indisponibilidade simulada após iniciar cada processo; padrão zero. Use 2000 para exercitar recuperação. |
 
-Para produção: autenticação corporativa, banco transacional, implantação com TLS, controle de acesso por função, trilha de auditoria protegida, calendário de SLA, monitoramento, limitação de uso e testes de autorização/deduplicação. O deploy é opcional no desafio e não foi configurado neste protótipo local.
+O projeto inclui [vercel.json](vercel.json), função em `api/index.ts` e adaptador Neon. O frontend usa Vite e a função Express recebe `/api`; as demais rotas carregam a SPA. O build é `npm run build`, saída `dist`, Node 22.x. Configure as variáveis de servidor antes de publicar. Não use prefixo `VITE_` em segredos nem tente persistir dados no disco temporário da Vercel. Nenhum deploy foi publicado nesta revisão.
+
+Proteções para a demonstração: até 30 mensagens/conversa, 10 novas conversas por funcionário/24h, até 100 chamadas LLM/dia por padrão, contexto de quatro mensagens anteriores, saída de 350 tokens e timeout de 10s. O teto do modelo é persistido no mesmo banco e funciona entre instâncias. São limites de aplicação, não garantia de gasto zero fora do free tier nem proteção completa contra abuso.
+
+## Trade-offs e próximos passos
+
+- O calendário considera segunda–sexta, 08h–18h, UTC−03; um dia útil equivale a dez horas de atendimento. Não há feriados. Críticos vencem em uma hora corrida, inclusive fins de semana.
+- A deduplicação lexical foi tornada conservadora: tipo/categoria iguais, ao menos duas palavras relevantes e sobreposição mínima de 60%. Pode deixar de reconhecer paráfrases ou unir descrições muito parecidas de ativos diferentes. Evoluir para matching semântico com confirmação do ticket candidato.
+- O snapshot JSONB simplifica a migração da demonstração, mas regrava todo o estado. Para volume real: tabelas normalizadas, migrações, transações de domínio, índices, retenção e backup. O arquivo local admite apenas um processo.
+- A gravação do ticket e a persistência da resposta do agente ainda ocorrem em operações separadas. Uma interrupção entre elas pode exigir consultar o ticket e reconciliar a conversa; uma próxima evolução deve adicionar recibos idempotentes/transação de confirmação.
+- O login de funcionário com qualquer senha é exclusivamente demonstrativo. Tokens assinados isolam as contas, mas não comprovam identidade; em produção seria necessário SSO, funções e autenticação forte.
+- A falha simulada do legado ocorre antes da escrita e tenta recuperação com backoff limitado. Falhas de rede de resultado incerto não são repetidas automaticamente pelo armazenamento remoto.
+- O modelo tem contrato e fallback testados com mocks. Ainda faltam avaliação semântica com casos reais anonimizados, teste real Neon/Vercel e medição de latência. A confiança do modelo é declarada, não uma probabilidade calibrada.

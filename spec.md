@@ -16,7 +16,8 @@
 - Console de analista com fila, filtros, histórico, assumir, devolver ao agent e encerrar.
 - Perfil do funcionário com dados de acesso e orientação de recuperação de senha.
 - Auditoria legível das decisões do agent: intenção, ação, dados considerados, confiança, motivo e resultado.
-- Dados de exemplo persistidos em arquivo local, incluindo chamados de outros funcionários para validar isolamento.
+- Dados de exemplo persistidos em JSON local ou Neon PostgreSQL, incluindo chamados de outros funcionários para validar isolamento.
+- Orquestração LangGraph.js com interpretação Gemini configurável e modo offline explícito.
 
 ### Fora do escopo
 
@@ -117,7 +118,9 @@ O modo analista de demonstração é acessado em `/analyst`. A interface do func
 
 ## 8. Arquitetura proposta
 
-React + Vite para interface; API HTTP Node/Express em TypeScript; `AgentService` determinístico; `TicketService` isolado como serviço simulado; repositório JSON atômico em `data/db.json`, com fila de escrita para serializar alterações locais. A UI acessa a API, não as regras diretamente. A identidade de funcionário é mantida no estado da aplicação de demonstração e validada pelo servidor em operações de tickets. Conversas são atualizadas a cada três segundos nas telas abertas.
+React + Vite para interface; Express 5 em TypeScript; grafo LangGraph.js com nós registrar, interpretar, aplicar política e persistir. Gemini interpreta intenções em JSON validado, sem autorização para executar escrita. `TicketService` isolado; repositório JSON atômico local ou snapshot JSONB na Neon com comparação de versão e repetição de conflitos. O estado de conversa é persistido pelo repositório, não por checkpoint interno do LangGraph. A UI acessa a API; a identidade vem do token assinado. Polling a cada três segundos, sem streaming de tokens.
+
+Configuração Vercel: função `api/index.ts` exporta o Express, frontend em `dist`, fallback SPA. O listener fica em `server/index.ts`. Deploy não foi executado nesta revisão.
 
 ## 9. Critérios de aceite
 
@@ -134,8 +137,11 @@ React + Vite para interface; API HTTP Node/Express em TypeScript; `AgentService`
 ## 10. Decisões e limites
 
 - A referência inicial do Anexo C foi substituída pelo arquivo completo `nexo.pen`, fornecido em 28/10/2026. Seus dados ilustrativos não substituem os dados reais da sessão.
-- O cálculo de prazo ainda usa horas corridas. O calendário de segunda–sexta, 08h–18h e feriados permanece pendente.
-- A aplicação é um protótipo local. Login demonstrativo e persistência em arquivo devem ser substituídos por identidade corporativa, banco transacional, controle de acesso e observabilidade antes de uso real.
+- SLA usa segunda–sexta, 08h–18h, UTC−03; dias úteis representam dez horas de atendimento. Não considera feriados. Críticos usam uma hora corrida.
+- O Pen oferece analista após selecionar ticket vencido; mantida essa interação. O Anexo A pode ser interpretado como transferência automática: diferença registrada em `docs/review.md`.
+- Regras de deduplicação são lexicais/conservadoras. A integração real Gemini/Neon e o deploy exigem validação com credenciais.
+- Confirmação do ticket e persistência da resposta são operações separadas; reconciliação/idempotência entre elas permanece uma limitação.
+- A aplicação é um protótipo local. Login demonstrativo e persistência em arquivo devem ser substituídos por identidade corporativa, modelagem transacional de domínio, controle de acesso e observabilidade antes de uso real.
 
 ## 11. Especificação visual do Pen
 
@@ -157,5 +163,5 @@ React + Vite para interface; API HTTP Node/Express em TypeScript; `AgentService`
 ## 12. Verificação da revisão visual
 
 - `npm run build`: TypeScript estrito de frontend/backend e bundle Vite.
-- `npm run test:integration`: quatro cenários contra uma API e um arquivo de dados temporários; cobre aliases de login, isolamento, seleção de chamado, edição/validação do rascunho, confirmação, troca de mensagens com agent pausado, escrita concorrente, devolução, encerramento e reinício.
+- `npm run test:integration`: build completo e suíte contra API/arquivos temporários; cobre isolamento, confirmação, atendimento humano, reinício, limite de sessão, SLA, deduplicação/reabertura, falha transitória, escopo, impacto, VPN, contrato LLM com mock, orçamento e concorrência do armazenamento por versão.
 - As verificações automatizadas exercitam comportamento. A correspondência visual é revisada com as propriedades e medidas do arquivo Pen e inspeção no navegador.
