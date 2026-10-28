@@ -11,7 +11,10 @@ const { mutateDb, readDb } = await import('../dist-server/store.js');
 const suffix = randomUUID();
 const owners = [`smoke-${suffix}`, `smoke-other-${suffix}`];
 const emails = [`smoke-${suffix}@nexo.com`, `smoke-other-${suffix}@nexo.com`];
-const analystPassword = randomUUID();
+const remoteBase = process.env.SMOKE_BASE_URL?.replace(/\/$/, '');
+if (remoteBase && !remoteBase.startsWith('https://')) throw new Error('Remote smoke test requires HTTPS.');
+const analystPassword = remoteBase ? process.env.ANALYST_PASSWORD : randomUUID();
+if (!analystPassword) throw new Error('Configure ANALYST_PASSWORD for the remote smoke test.');
 const serverEnv = {
   ...process.env, PORT: '0', VERCEL: '', GEMINI_API_KEY: '', LEGACY_OUTAGE_MS: '0',
   ALLOW_DEMO_SIGNUP: 'false', ANALYST_PASSWORD: analystPassword, SESSION_SECRET: randomUUID(),
@@ -21,6 +24,7 @@ let base;
 let inserted = false;
 
 async function start() {
+  if (remoteBase) { base = remoteBase; return; }
   server = spawn(process.execPath, ['dist-server/index.js'], { env: serverEnv, stdio: ['ignore', 'pipe', 'pipe'] });
   base = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Application startup timed out.')), 15_000);
@@ -45,6 +49,20 @@ async function request(path, token = '', body) {
   const result = await response.json();
   assert.ok(response.ok, `${path}: HTTP ${response.status}; ${result.error ?? 'request failed'}`);
   return result;
+}
+
+async function redeploy() {
+  const child = spawn('vercel', ['deploy', '--prod', '--yes', '--json'], {
+    env: { ...process.env, VERCEL_CLI_USE_NATIVE_BINARY: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk.toString(); });
+  child.stderr.on('data', () => {});
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0, 'Production redeploy failed; inspect Vercel build logs.');
+  const result = JSON.parse(output);
+  assert.equal(result.deployment.readyState, 'READY');
+  console.log(`PASS Production redeploy ready: ${result.deployment.id}`);
 }
 
 try {
@@ -77,10 +95,20 @@ try {
   assert.equal((await request('/conversations', other.token)).conversations.length, 0);
   console.log('PASS Employee isolation');
 
+  if (remoteBase) {
+    const semantic = await message('Quais registros de suporte existem em meu nome?');
+    const audit = semantic.conversation.messages.at(-1).audit;
+    assert.equal(audit.action, 'listar_tickets');
+    assert.ok(audit.evidence.some(item => item.includes('Triagem Gemini')));
+    console.log('PASS Live Gemini semantic routing and audit on deployed application');
+    if (process.env.SMOKE_REDEPLOY === '1') await redeploy();
+  }
   await stop(); await start();
   assert.ok((await request('/tickets', token)).tickets.some(t => t.id === ticket.id));
   assert.ok((await request('/conversations', token)).conversations.some(c => c.id === conversation.id));
-  console.log('PASS Ticket and conversation survive application restart');
+  console.log(remoteBase
+    ? `PASS Remote ticket and conversation persistence${process.env.SMOKE_REDEPLOY === '1' ? ' after redeploy' : ''}`
+    : 'PASS Ticket and conversation survive application restart');
   assert.equal((await message('Falar com analista')).conversation.status, 'waiting_human');
   const analyst = await request('/analyst/login', '', { password: analystPassword });
   const action = (name, body = {}) => request(`/analyst/conversations/${conversation.id}/${name}`, analyst.token, body);
