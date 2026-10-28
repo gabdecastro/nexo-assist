@@ -8,7 +8,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite --host 0.0.0.0",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.server.json && tsc -p tsconfig.api.json && vite build",
-    "test:integration": "tsc -p tsconfig.server.json && node --test tests/*.test.mjs",
+    "test:integration": "npm run build && node --test tests/*.test.mjs",
     "start": "node dist-server/index.js"
   },
   "dependencies": {
