@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './env.js';
 import { resolve } from 'node:path';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';

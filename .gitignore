@@ -9,3 +9,4 @@ data/db.json
 .vercel/
 data/*.tmp
 DEPLOY_VERCEL.local.md
+.neon
