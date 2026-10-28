@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/gabdecastro/nexo-assist/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gabdecastro/nexo-assist/actions/workflows/ci.yml)
 
+**[Abrir demonstração](https://nexo-assist-weld.vercel.app)** · [Console do analista](https://nexo-assist-weld.vercel.app/analyst)
+
 Service desk de demonstração com chat, triagem auditável em LangGraph.js, integração Gemini, serviço simulado de chamados e console de analista. Implementado a partir de [spec.md](spec.md) e das seis telas de [nexo.pen](design/nexo.pen).
 
 ## Executar
@@ -69,7 +71,7 @@ Esse comando compila frontend/backend/entrada serverless e executa a suíte Node
 
 O [pipeline CI](.github/workflows/ci.yml) executa em pushes, pull requests e manualmente pelo GitHub Actions. Usa Ubuntu e Node 22, instala com `npm ci` e roda o comando acima. As actions são fixadas por hash, o token tem somente permissão de leitura e execuções antigas da mesma branch são canceladas. Não exige secrets nem publica deploys.
 
-Para validar o LLM real, configure a chave, inicie uma conversa e pergunte “Quais registros de suporte existem em meu nome?”. Expanda a auditoria: deve conter “Triagem Gemini”, a intenção e a evidência, além dos tickets próprios. Teste também uma dúvida de senha e um caso ambíguo. Uma resposta apenas determinística ou um erro do provedor não valida esse caminho. Não foi feita avaliação com chave real nesta revisão.
+Para validar o LLM real, configure a chave, inicie uma conversa e pergunte “Quais registros de suporte existem em meu nome?”. Expanda a auditoria: deve conter “Triagem Gemini”, a intenção e a evidência, além dos tickets próprios. Teste também uma dúvida de senha e um caso ambíguo. Uma resposta apenas determinística ou um erro do provedor não valida esse caminho. A integração real foi validada no deploy com Gemini 3.5 Flash-Lite; a avaliação ampla de qualidade semântica continua como próximo passo.
 
 A interface conserva os seis layouts do Pen, incluindo rascunho editável, auditoria e estados de carregamento/erro. Atualizações entre funcionário/analista usam polling de três segundos; não há streaming por token. O perfil mostra dados reais da sessão, mas recuperação de senha apenas orienta o contato com a TI. Indicadores do login são ilustrativos.
 
@@ -88,7 +90,7 @@ Todas as variáveis estão em [.env.example](.env.example):
 | `LLM_DAILY_LIMIT` | Teto de chamadas por dia UTC, persistido e compartilhado; padrão 100, zero bloqueia. |
 | `LEGACY_OUTAGE_MS` | Indisponibilidade simulada após iniciar cada processo; padrão zero. Use 2000 para exercitar recuperação. |
 
-O projeto inclui [vercel.json](vercel.json), função em `api/index.ts` e adaptador Neon. O frontend usa Vite e a função Express recebe `/api`; as demais rotas carregam a SPA. O build é `npm run build`, saída `dist`, Node 22.x. Configure as variáveis de servidor antes de publicar. Não use prefixo `VITE_` em segredos nem tente persistir dados no disco temporário da Vercel. Nenhum deploy foi publicado nesta revisão.
+O projeto inclui [vercel.json](vercel.json), função em `api/index.ts` e adaptador Neon. O frontend usa Vite e a função Express recebe `/api`; as demais rotas carregam a SPA. O build é `npm run build`, saída `dist`, Node 22.x. Configure as variáveis de servidor antes de publicar. Não use prefixo `VITE_` em segredos nem tente persistir dados no disco temporário da Vercel. A demonstração está publicada na Vercel Hobby e o repositório está conectado para deploys da branch `main`. As oito variáveis de produção foram configuradas no servidor, com credenciais marcadas como Secret. Veja [resultados do deploy](docs/vercel-deploy.md).
 
 Proteções para a demonstração: até 30 mensagens/conversa, 10 novas conversas por funcionário/24h, até 100 chamadas LLM/dia por padrão, contexto de quatro mensagens anteriores, saída de 350 tokens e timeout de 10s. O teto do modelo é persistido no mesmo banco e funciona entre instâncias. São limites de aplicação, não garantia de gasto zero fora do free tier nem proteção completa contra abuso.
 
@@ -101,9 +103,11 @@ npx --yes neon deploy
 npm run test:neon
 ```
 
-`neon deploy` aplica a configuração dos serviços Neon e atualiza as variáveis locais; não publica o frontend ou a API Express. `test:neon` é um teste opt-in que usa o banco configurado: cria dois funcionários temporários, exercita login, confirmação de chamado, privacidade, persistência após reinício e handoff, depois remove somente seus registros. Não executa Gemini nem faz parte do CI offline. Execute com um banco no qual esteja autorizado a criar dados de teste.
+`neon deploy` aplica a configuração dos serviços Neon e atualiza as variáveis locais; não publica o frontend ou a API Express. `test:neon` é um teste opt-in que usa o banco configurado: cria dois funcionários temporários, exercita login, confirmação de chamado, privacidade, persistência após reinício e handoff, depois remove somente seus registros. No modo local padrão, não executa Gemini nem faz parte do CI offline. Execute com um banco no qual esteja autorizado a criar dados de teste.
 
 O teste ponta a ponta de PostgreSQL foi executado com sucesso na configuração solicitada. O [registro da instalação e validação](docs/neon-setup.md) descreve mudanças, saídas e a falha de build corrigida. A conexão do MCP no cliente é independente do login do CLI; o plugin já está instalado, mas pode ser necessário recarregar o cliente para carregar suas ferramentas.
+
+O smoke test também aceita `SMOKE_BASE_URL` para validar uma aplicação já publicada, exercitando Gemini real e exigindo `ANALYST_PASSWORD` no ambiente. Com `SMOKE_REDEPLOY=1`, publica uma nova versão pelo CLI autenticado antes de verificar persistência; esse modo não faz parte do CI.
 
 ## Trade-offs e próximos passos
 
@@ -113,4 +117,4 @@ O teste ponta a ponta de PostgreSQL foi executado com sucesso na configuração 
 - A gravação do ticket e a persistência da resposta do agente ainda ocorrem em operações separadas. Uma interrupção entre elas pode exigir consultar o ticket e reconciliar a conversa; uma próxima evolução deve adicionar recibos idempotentes/transação de confirmação.
 - O login de funcionário com qualquer senha é exclusivamente demonstrativo. Tokens assinados isolam as contas, mas não comprovam identidade; em produção seria necessário SSO, funções e autenticação forte.
 - A falha simulada do legado ocorre antes da escrita e tenta recuperação com backoff limitado. Falhas de rede de resultado incerto não são repetidas automaticamente pelo armazenamento remoto.
-- O modelo tem contrato e fallback testados com mocks. Ainda faltam avaliação semântica com casos reais anonimizados, teste de hospedagem Vercel e medição de latência. PostgreSQL Neon já foi validado pelo teste opt-in descrito acima. A confiança do modelo é declarada, não uma probabilidade calibrada.
+- O modelo tem contrato e fallback testados com mocks. Ainda faltam avaliação semântica com casos reais anonimizados e medição de latência/carga. Vercel, PostgreSQL Neon e uma chamada semântica real ao Gemini já foram validados no teste remoto. A confiança do modelo é declarada, não uma probabilidade calibrada.
