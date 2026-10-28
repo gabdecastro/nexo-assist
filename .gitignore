@@ -4,3 +4,8 @@ dist-server/
 data/db.json
 .env
 .DS_Store
+.env.*
+!.env.example
+.vercel/
+data/*.tmp
+DEPLOY_VERCEL.local.md

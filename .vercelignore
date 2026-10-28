@@ -1,0 +1,8 @@
+design/
+tests/
+docs/
+data/
+.env
+.env.*
+DEPLOY_VERCEL.local.md
+.git/

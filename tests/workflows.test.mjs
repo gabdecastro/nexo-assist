@@ -12,7 +12,7 @@ let base;
 
 async function start() {
   server = spawn(process.execPath, ['dist-server/index.js'], {
-    env: { ...process.env, PORT: '0', GEMINI_API_KEY: '', DATABASE_URL: '', VERCEL: '', LEGACY_OUTAGE_MS: '0', DATA_FILE: join(directory, 'db.json'), SESSION_SECRET: 'integration-test-only' },
+    env: { ...process.env, PORT: '0', GEMINI_API_KEY: '', DATABASE_URL: '', VERCEL: '', LEGACY_OUTAGE_MS: '0', ANALYST_PASSWORD: '', ALLOW_DEMO_SIGNUP: 'true', DATA_FILE: join(directory, 'db.json'), SESSION_SECRET: 'integration-test-only' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   base = await new Promise((resolve, reject) => {
@@ -147,4 +147,26 @@ test('VPN answer checks operating system applicability', async () => {
   assert.match(question.conversation.messages.at(-1).content, /Windows 10 ou Windows 11/);
   const reply = await send(c.id, token, 'VPN no Windows 11');
   assert.match(reply.conversation.messages.at(-1).content, /service desk precisa analisar/);
+});
+
+
+test('session signatures, API errors and production SPA routing are enforced', async () => {
+  const { token } = await login();
+  assert.equal((await request('/tickets', token + '.unexpected')).status, 401);
+  assert.equal((await request('/analyst/conversations', token)).status, 401);
+  assert.equal((await request('/missing-route', token)).status, 404);
+  const invalid = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
+  assert.equal(invalid.status, 400);
+  // The integration task runs after build when checking the deploy artifact.
+  const spa = await fetch(`${base}/analyst`);
+  assert.equal(spa.status, 200);
+  assert.match(await spa.text(), /<div id="root"><\/div>/);
+});
+
+test('session stops after 30 employee messages even during human handoff', async () => {
+  const { token } = await login('message-limit@nexo.com');
+  const c = await conversation(token);
+  await send(c.id, token, 'Falar com analista');
+  for (let i = 1; i < 30; i++) assert.equal((await send(c.id, token, `Detalhe ${i}`)).status, 200);
+  assert.equal((await send(c.id, token, 'Mensagem 31')).status, 409);
 });
